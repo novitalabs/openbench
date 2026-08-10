@@ -30,10 +30,13 @@ Provider Routing Docs: https://openrouter.ai/docs/features/provider-routing
 """
 
 import os
+import logging
 from typing import Any, List, Dict
 
 from inspect_ai.model._providers.openai_compatible import OpenAICompatibleAPI
 from inspect_ai.model import GenerateConfig
+
+logger = logging.getLogger(__name__)
 
 
 class OpenRouterAPI(OpenAICompatibleAPI):
@@ -127,22 +130,42 @@ class OpenRouterAPI(OpenAICompatibleAPI):
 
         # Inject provider routing parameters into all chat completion requests.
         # This is necessary because Inspect-ai doesn't properly pass config.extra_body through to the underlying client calls
-        if self._extra_body:
-            original_create = self.client.chat.completions.create
+        # Patch unconditionally so we can also log actual provider attribution
+        # even when no routing constraint is requested.
+        original_create = self.client.chat.completions.create
+        _requested = self._extra_body.get("provider") if self._extra_body else None
+        # Track last serving provider so we only log on change.
+        self._last_provider: Any = object()
 
-            def create_with_provider_routing(**kwargs):
-                # Merge provider routing parameters with any existing extra_body
-                if "extra_body" not in kwargs:
-                    kwargs["extra_body"] = {}
-                if kwargs["extra_body"] is None:
+        async def create_with_provider_routing(**kwargs):
+            # Merge provider routing parameters with any existing extra_body
+            if self._extra_body:
+                if not kwargs.get("extra_body"):
                     kwargs["extra_body"] = {}
                 kwargs["extra_body"].update(self._extra_body)
-                return original_create(**kwargs)
+            resp = await original_create(**kwargs)
+            # OpenRouter echoes the serving provider in the response body.
+            actual = getattr(resp, "provider", None)
+            if actual is None:
+                try:
+                    actual = resp.model_dump().get("provider")
+                except Exception:
+                    actual = "<unknown>"
+            # Only log when the serving provider changes from the previous
+            # response, to avoid one line per request.
+            if actual != self._last_provider:
+                logger.warning(
+                    "[openrouter] requested provider=%s -> served by=%s",
+                    _requested,
+                    actual,
+                )
+                self._last_provider = actual
+            return resp
 
-            # Replace the create method
-            setattr(
-                self.client.chat.completions, "create", create_with_provider_routing
-            )
+        # Replace the create method
+        setattr(
+            self.client.chat.completions, "create", create_with_provider_routing
+        )
 
     def service_model_name(self) -> str:
         """Return model name without service prefix."""

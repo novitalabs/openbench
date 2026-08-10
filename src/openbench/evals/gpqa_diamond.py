@@ -6,17 +6,23 @@ from openbench.utils.text import SIMPLE_EVALS_SYSTEM_MESSAGE
 from openbench.utils.text import MULTIPLE_CHOICE_PROMPT_TEMPLATE
 
 
-# There is one difference between this and the original gpqa simple eval - the prompts are not reshuffled for every epoch. Shouldn't be that big of a deal, but worth noting.
+# Options are shuffled deterministically PER QUESTION (seeded by the question
+# text) rather than with a single global seed. A single global seed reshuffles
+# the same fixed initial order identically for every record, pinning the correct
+# answer to one letter across the dataset; per-question seeding keeps the shuffle
+# reproducible while spreading the correct answer across A/B/C/D, matching
+# OpenRouter's "shuffles by index" convention (see Auto Exacto docs). Note: the
+# prompts are not reshuffled across epochs.
 def record_to_mcq_sample(record: dict) -> MCQSample:
     """Convert a GQPQA Diamond record to an openbench MCQSample."""
-    random.seed(0)
+    rng = random.Random(record["Question"])
     options = [
         record["Correct Answer"],
         record["Incorrect Answer 1"],
         record["Incorrect Answer 2"],
         record["Incorrect Answer 3"],
     ]
-    random.shuffle(options)
+    rng.shuffle(options)
     # Get index of correct answer and convert to A, B, C, D
     correct_index = options.index(record["Correct Answer"])
     correct_letter = "ABCD"[correct_index]
