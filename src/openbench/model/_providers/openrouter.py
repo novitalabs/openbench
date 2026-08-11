@@ -163,9 +163,7 @@ class OpenRouterAPI(OpenAICompatibleAPI):
             return resp
 
         # Replace the create method
-        setattr(
-            self.client.chat.completions, "create", create_with_provider_routing
-        )
+        setattr(self.client.chat.completions, "create", create_with_provider_routing)
 
     def completion_params(self, config: GenerateConfig, tools: bool) -> Dict[str, Any]:
         """Emit reasoning controls in BOTH shapes.
