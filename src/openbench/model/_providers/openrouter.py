@@ -167,6 +167,35 @@ class OpenRouterAPI(OpenAICompatibleAPI):
             self.client.chat.completions, "create", create_with_provider_routing
         )
 
+    def completion_params(self, config: GenerateConfig, tools: bool) -> Dict[str, Any]:
+        """Emit reasoning controls in BOTH shapes.
+
+        The base OpenAICompatibleAPI injects a flat top-level ``reasoning_effort``
+        (OpenAI o-series style). OpenRouter's own documented shape is the nested
+        ``reasoning: {effort|max_tokens}`` object. We keep the top-level field AND
+        add the nested one (same value), so the request is valid regardless of
+        which shape the account/route honors. ``reasoning_tokens`` maps to
+        ``max_tokens`` and takes precedence over ``effort`` (OpenRouter's rule).
+
+        The nested object rides in ``extra_body.reasoning``; the provider-routing
+        monkey-patch merges ``self._extra_body`` (its ``provider`` key) on top at
+        request time, so the two coexist without clobbering each other.
+        """
+        params = super().completion_params(config, tools)
+
+        reasoning: Dict[str, Any] = {}
+        if config.reasoning_tokens is not None:
+            reasoning["max_tokens"] = config.reasoning_tokens
+        elif config.reasoning_effort is not None:
+            reasoning["effort"] = config.reasoning_effort
+
+        if reasoning:
+            extra_body = params.get("extra_body") or {}
+            extra_body["reasoning"] = reasoning
+            params["extra_body"] = extra_body
+
+        return params
+
     def service_model_name(self) -> str:
         """Return model name without service prefix."""
         return self.model_name
